@@ -1,0 +1,7 @@
+{
+  "name": "blinkenbar-media",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Headless renderer for README screenshots/GIFs (dev tooling only).",
+  "dependencies": { "canvas": "^3.0.0" }
+}

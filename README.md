@@ -2,9 +2,23 @@
 
 Blinkenbar is a low-overhead, local-first activity display for Hermes Desktop. It turns system utilization and Hermes gateway events into a compact bank of animated “blinkenlights,” making concurrent agent work legible without opening logs or exposing prompt content.
 
-## Screenshot
+## Screenshots
 
-> **Screenshot placeholder:** Add a 1600×900 capture of the Blinkenbar pane docked to the right of Hermes Desktop, showing system rows, one primary agent bank, two subagent banks, and the status-bar chip. Remove account names, prompts, session identifiers, and unrelated desktop content first.
+All media below is rendered by `scripts/media/` from the shipped renderer with a fully synthetic roster — real output, no live session data.
+
+![Blinkenbar pane: system rows, a primary agent bank, and subagent banks](docs/media/blinkenbar-hero.png)
+
+![Animated demo: idle, thinking, delegation, waiting, and completion](docs/media/blinkenbar-demo.gif)
+
+Color modes and the quiet idle state:
+
+| EMBER | ION | VIOLET |
+|---|---|---|
+| ![EMBER mode](docs/media/blinkenbar-hero.png) | ![ION mode](docs/media/blinkenbar-mode-ion.png) | ![VIOLET mode](docs/media/blinkenbar-mode-violet.png) |
+| **MATRIX** | **THEME** | **QUIET** |
+| ![MATRIX mode](docs/media/blinkenbar-mode-matrix.png) | ![THEME mode](docs/media/blinkenbar-mode-theme.png) | ![Quiet idle state](docs/media/blinkenbar-quiet.png) |
+
+Regenerate the media after any renderer change with `scripts/media/render.js` (see the Testing section).
 
 ## Features
 
@@ -93,6 +107,20 @@ From the package root:
 ```
 
 The script runs JavaScript syntax and reducer tests, Python bytecode compilation and unit tests, a metrics smoke call, metadata validation, marker/secret-pattern scans, and the offline `hermes plugins doctor --ci` package check when Hermes is installed. A visual check should also confirm theme switching, pane resizing, all color/pattern modes, the identity command, status chip, signal test, offline recovery, and GPU-unavailable rendering.
+
+## Release media
+
+`scripts/media/` renders the README screenshots and demo GIF straight from `desktop/plugin.js` (it slices the pure canvas renderer into a node-canvas harness) with a synthetic roster and theme, so media always matches the shipped code and never contains live session data.
+
+```bash
+cd scripts/media
+npm install
+node extract-renderer.js
+node render.js shot docs/media/blinkenbar-hero.png EMBER CROSSWASH 6.5 420x560
+node render.js frames /tmp/blinkenbar-frames 8 12 EMBER CROSSWASH 360x480
+```
+
+Then encode the frames into a GIF with ffmpeg (two-pass palette method), and rerun the mode variants for ION, VIOLET, MATRIX, and THEME.
 
 ## Dependencies
 
