@@ -1,0 +1,13 @@
+manifest_version: 1
+name: blinkenbar
+version: "0.9.0-pre.2"
+description: Local system and agent-activity telemetry for the Hermes Desktop Blinkenbar pane
+author: "Chris M.; ProDyn.ai / Promethean Dynamic; chrism@promethean-dynamic.com"
+license: MIT
+tags:
+  - desktop
+  - telemetry
+  - visualization
+  - multi-agent
+python_dependencies:
+  - "psutil>=5.9,<8"

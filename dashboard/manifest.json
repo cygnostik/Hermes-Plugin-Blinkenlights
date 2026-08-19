@@ -1,0 +1,7 @@
+{
+  "name": "blinkenbar",
+  "label": "Blinkenbar",
+  "version": "0.9.0-pre.2",
+  "description": "Local system telemetry for the Blinkenbar desktop pane",
+  "api": "plugin_api.py"
+}

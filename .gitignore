@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.env
+.env.*
+!.env.example
+*.sqlite3
+*.db
+*.log
+node_modules/
+dist/
+build/
+.coverage
+.pytest_cache/
+.ruff_cache/
