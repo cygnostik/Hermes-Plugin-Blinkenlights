@@ -56,7 +56,11 @@ Prerequisites:
 - Python packages `fastapi` and `psutil` in the Hermes runtime.
 - Optional: an NVIDIA driver exposing NVML on Windows for GPU telemetry.
 
-Install the unified package:
+Install the unified package.
+
+**One-click (Hermes Desktop):** [Install in Hermes](hermes://plugin/install?repo=cygnostik/Hermes-Plugin-Blinkenlights) — opens the install dialog with component selection; nothing installs until you confirm.
+
+Or from the CLI:
 
 ```bash
 hermes plugins install cygnostik/Hermes-Plugin-Blinkenlights
