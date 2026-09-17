@@ -2,7 +2,35 @@
 
 All notable changes to Blinkenbar will be recorded here. The format follows Keep a Changelog, and versions use Semantic Versioning.
 
-## [Unreleased]
+## [0.9.0-pre.3] - 2026-09-17
+
+### Added
+
+- Automatic main-agent labels from Hermes profile metadata, with short identifiers retained for unnamed delegated workers.
+
+### Fixed
+
+- Refresh main-agent identities when focused sessions or owners change, including older SDK fallback behavior.
+- Keep known completed children terminal when late progress arrives; explicit starts can reopen them.
+- Ignore housekeeping broadcasts, exclude events tagged for other connections, and separate child identities by profile.
+- Mark disconnected work unverified instead of leaving active lights and counts indefinitely.
+- Suspend metrics polling for hidden panes and disconnected gateways; isolate cached telemetry across connection changes.
+- Display unavailable measurements as `--` rather than measured zero, and keep tiny lamp grids within their container.
+
+### Changed
+
+- Preserve the dense light field, subdued labels, existing palettes and ambient/activity motion.
+- Remove the psutil upper-version cap; keep Hermes compatibility capability-based rather than imposing a host version range.
+- Retry telemetry without reconnecting or restarting the gateway.
+- Replace renderer-slicing media tools with a browser harness that loads the emitted plugin and actual React/Query runtime.
+- Refresh public media with actual aggregate counter samples and an idle agent; add a 2:1 catalog image.
+- Clarify runtime data use, remote-host metrics and the difference between ambient animation and measured activity.
+
+### Removed
+
+- Live synthetic-agent signal test and its command.
+- Canvas click inspection, hit regions and interactive status-chip behavior.
+- Retention of goals, message previews, model labels and click-detail metadata.
 
 ## [0.9.0-pre.2] - 2026-08-18
 

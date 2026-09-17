@@ -16,6 +16,8 @@ Blinkenbar is MIT-licensed. Contributions are welcome through issues and pull re
 - Keep comments rare, concise, and limited to non-obvious technical constraints.
 - Remove dead code, commented-out code, temporary diagnostics, TODO markers, and generated artifacts before review.
 - Keep metric semantics honest: proxies must be described as activity indicators, not measurements.
+- Preserve the dense supercomputer-panel aesthetic: small, subdued labels and rhythmic idle movement are intentional. Activity patterns respond to real events; individual lamps are not literal hardware counters.
+- Keep test fixtures outside the runtime. Do not inject synthetic agents into the live roster or add interaction to the passive canvas.
 
 ## Verification
 
@@ -31,9 +33,9 @@ Then verify in Hermes Desktop:
 - pane docking and resizing;
 - light-bank hierarchy and bounded retention;
 - all color modes and patterns;
-- identity configuration and generic reset;
-- signal test and click detail;
-- telemetry-offline recovery;
+- automatic profile names, connection-scoped overrides and blank-to-automatic reset;
+- passive canvas and status chip;
+- telemetry-only retry without reconnecting or restarting the gateway;
 - hidden-pane rendering/polling suspension;
 - GPU-unavailable behavior on systems without supported NVML.
 

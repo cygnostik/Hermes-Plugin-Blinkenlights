@@ -65,6 +65,10 @@ required = [
 missing = [item for item in required if item not in yaml_text]
 if missing:
     raise SystemExit(f"plugin.yaml missing: {missing}")
+if re.search(r"^requires_hermes:\s*\S", yaml_text, re.MULTILINE):
+    raise SystemExit("Keep host compatibility capability-based; review any Hermes version gate explicitly")
+if not re.search(r'^\s*-\s*"psutil>=5\.9"\s*$', yaml_text, re.MULTILINE):
+    raise SystemExit("Keep psutil free of exact pins and upper-version caps")
 version_match = re.search(r"^version:\s*\"([^\"]+)\"\s*$", yaml_text, re.MULTILINE)
 if not version_match:
     raise SystemExit('plugin.yaml must carry a quoted version: "x.y.z..."')
@@ -74,8 +78,8 @@ if manifest.get("version") != version_match.group(1):
 if not re.search(r"^license:\s*MIT\s*$", yaml_text, re.MULTILINE | re.IGNORECASE):
     raise SystemExit("plugin.yaml must declare license: MIT")
 
-ignored_parts = {".git", "node_modules", "dist", "build", "__pycache__", ".pytest_cache"}
-text_suffixes = {".js", ".py", ".json", ".yaml", ".yml", ".md", ".sh", ""}
+ignored_parts = {".git", ".qa", "node_modules", "dist", "build", "__pycache__", ".pytest_cache"}
+text_suffixes = {".js", ".mjs", ".jsx", ".css", ".html", ".py", ".json", ".yaml", ".yml", ".md", ".sh", ""}
 files = [
     path for path in root.rglob("*")
     if path.is_file()

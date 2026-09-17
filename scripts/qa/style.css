@@ -1,0 +1,15 @@
+@import 'tailwindcss';
+@source '../../desktop/plugin.js';
+:root {
+  --ui-accent: #fb923c; --ui-accent-secondary: #38bdf8;
+  --ui-bg-editor: #09090b; --ui-bg-card: #18181b; --ui-bg-chrome: #0e0e10; --ui-bg-elevated: #1c1c20;
+  --ui-blue: #3b82f6; --ui-cyan: #06b6d4; --ui-green: #22c55e; --ui-orange: #f97316;
+  --ui-purple: #a855f7; --ui-red: #ef4444; --ui-yellow: #eab308;
+  --ui-stroke-secondary: #3f3f46; --ui-text-primary: #e4e4e7;
+  --ui-text-secondary: #a1a1aa; --ui-text-tertiary: #71717a; --ui-text-quaternary: #52525b;
+  --chrome-action-hover: #27272a; color: var(--ui-text-primary); background: #000;
+  font-family: ui-monospace, monospace;
+}
+body { margin: 0; }
+#pane { width: 100vw; height: calc(100vh - 24px); }
+#chip { height: 24px; background: var(--ui-bg-chrome); }

@@ -15,6 +15,12 @@ Blinkenbar does not vendor third-party source or binary dependencies in this rep
 
 No third-party fonts, images, video, audio, JavaScript bundles, analytics SDKs, or model assets are included.
 
+## Development-only tooling
+
+The optional browser harness reuses Vite, Tailwind CSS, Playwright/Chromium, React Query and nanostores from a Hermes development checkout. FFmpeg encodes the preview animation. These tools and their dependency bundles are not included in the plugin. Their own distributions carry the applicable license notices.
+
+Product screenshots are generated from this repository's plugin code. No video frames, hardware photographs or external artwork are copied into the images.
+
 ## Visual inspiration
 
 The blinkenlight visual direction was inspired by a demonstration by Boz Brown: https://www.youtube.com/watch?v=vKjqw5iGqnQ. No content from the video is bundled or represented as licensed material. Boz Brown is not affiliated with, a contributor to, or an endorser of Blinkenbar.

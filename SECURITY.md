@@ -20,11 +20,11 @@ Include the affected version, platform, Hermes version, reproducible steps, impa
 
 ## Expected behavior and trust boundary
 
-Blinkenbar consumes local Hermes gateway event metadata and samples aggregate system counters through a namespaced FastAPI endpoint. It retains a bounded in-memory entity roster and plugin preferences. It has no intended outbound connection, analytics service, file-content reader, credential reader, database, or model-callable tool.
+Blinkenbar consumes Hermes gateway event metadata and samples aggregate system counters through a namespaced FastAPI endpoint. It retains a bounded in-memory entity roster and plugin preferences. It has no analytics service, file-content reader, credential reader, database, model-callable tool or independent telemetry destination. With a remote Hermes gateway, event metadata and metrics travel through the existing Hermes connection to the desktop.
 
 The optional Windows GPU probe obtains the system directory from the operating system and loads only the resulting absolute `System32\nvml.dll` path with `LOAD_LIBRARY_SEARCH_SYSTEM32`. It never falls back to the current directory, `PATH`, or another DLL search location; unavailable NVML degrades GPU counters without failing the endpoint.
 
-The entity roster is capped at 18 entries with deterministic eviction while the focused primary entity remains protected. Goal and preview metadata are capped at 48 characters while live and redacted when an entity completes or errors, but may appear in local click notifications before redaction. Treat screen-sharing and notification surfaces as part of the operator’s privacy boundary.
+The entity roster is capped at 18 entries with deterministic eviction while the focused primary entity remains protected. It retains activity and ownership identifiers, not goals, previews, prompt bodies or model labels. A bounded set of completed child identities prevents late events from reopening known terminal work. The canvas exposes no click notifications. Configured agent names, local overrides and short identifiers remain visible on the panel. Naming metadata is read through Hermes's existing `profiles.list` RPC and retained only in memory; overrides are stored in plugin-scoped preferences by connection and profile.
 
 ## Response
 

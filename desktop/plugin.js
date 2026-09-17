@@ -14,14 +14,16 @@ import { jsx, jsxs } from 'react/jsx-runtime'
 
 const ID = 'blinkenbar'
 const MAX_ENTITIES = 18
-const MAX_METADATA_CHARS = 48
 const RETAIN_DONE_MS = 45000
 const $mesh = atom({ entities: [], eventCount: 0, lastEventAt: 0 })
-const $identity = atom({ label: 'AGENT' })
+const $identity = atom({ names: new Map(), overrides: {} })
+const $telemetryEpoch = atom(Date.now())
+// Bounded terminal identities outlive the visible roster, without task content.
+const terminalChildren = new Set()
 
 const safe = (value, limit = 72) =>
   typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, limit) : ''
-const safeMetadata = value => safe(value, MAX_METADATA_CHARS)
+
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, Number(value) || 0))
 const shortId = value => safe(value, 20).slice(-6).toUpperCase() || 'LOCAL'
 
@@ -48,37 +50,68 @@ function mutate(mutator) {
   $mesh.set(next)
 }
 
-function displayName({ isMain, profile, sessionId, subId, index }) {
+// A null registry id is the SDK's local-primary path; absent atoms are legacy.
+const currentConnection = () => host.state.connectionId?.get() || (host.state.connectionId ? 'local' : '')
+const identityKey = (connectionId, profile) => JSON.stringify([connectionId, profile || 'default'])
+const identityLabel = value => safe(value, 20).toUpperCase()
+
+function focusedContext() {
+  const state = host.state
+  const owner = state.focusedSessionOwner?.get()
+  const connectionId = currentConnection()
+  return {
+    connectionId,
+    sessionId: safe((state.focusedSessionId || state.activeSessionId).get()) || 'draft',
+    profile: safe(owner?.profile) || safe((state.focusedSessionProfile || state.profile).get()) || 'default',
+    resolved: !state.focusedSessionOwner || Boolean(owner && owner.connectionId === connectionId)
+  }
+}
+
+function isFocused(entity) {
+  const focus = focusedContext()
+  return focus.resolved && entity.isMain && entity.connectionId === focus.connectionId && entity.sessionId === focus.sessionId && (entity.profile || 'default') === focus.profile
+}
+
+function relabelMains(state) {
+  state.entities.forEach(entity => {
+    if (entity.isMain) entity.name = displayName(entity)
+  })
+}
+
+function displayName({ isMain, profile, connectionId = currentConnection(), subId, index }) {
   if (isMain) {
-    const active = host.state.activeSessionId.get()
-    if (!sessionId || sessionId === 'draft' || sessionId === active) return $identity.get().label
-    return `AGENT·${shortId(sessionId)}`
+    const key = identityKey(connectionId, profile)
+    const identity = $identity.get()
+    return identityLabel(identity.overrides[key]) || identity.names.get(key)
+      || identityLabel(!profile || profile === 'default' ? 'Hermes' : profile)
   }
   return `SUB·${shortId(subId || String(index + 1))}`
 }
 
 function configureIdentity(ctx) {
-  const current = $identity.get().label
-  const requested = globalThis.prompt?.('Blinkenbar agent label', current)
+  const focus = focusedContext()
+  if (!focus.resolved || !focus.connectionId) {
+    host.notify({ kind: 'info', message: 'Focus an agent on the selected connection to override its label.' })
+    return
+  }
+  const key = identityKey(focus.connectionId, focus.profile)
+  const current = $identity.get()
+  const requested = globalThis.prompt?.(`Blinkenbar label for ${focus.profile} (blank restores automatic)`, current.overrides[key] || '')
   if (requested == null) return
-  const label = safe(requested, 20).toUpperCase() || 'AGENT'
-  ctx.storage.set('agentLabel', label)
-  $identity.set({ label })
-  mutate(state => {
-    const active = host.state.activeSessionId.get()
-    state.entities.forEach(entity => {
-      if (entity.isMain && (entity.sessionId === active || (!active && entity.sessionId === 'draft'))) entity.name = label
-    })
-  })
-  host.notify({ kind: 'success', message: `Blinkenbar agent label set to ${label}.` })
+  const label = identityLabel(requested)
+  const overrides = { ...current.overrides }
+  if (label) overrides[key] = label
+  else delete overrides[key]
+  ctx.storage.set('agentLabelsV2', overrides)
+  $identity.set({ ...current, overrides })
+  mutate(relabelMains)
+  host.notify({ kind: 'success', message: label ? `Blinkenbar label for ${focus.profile} set to ${label}.` : `Blinkenbar automatic label restored for ${focus.profile}.` })
 }
 
 function boundEntities(state, retainedId = '') {
-  const activeSession = safe(host.state.activeSessionId.get())
-  const activeProfile = safe(host.state.profile.get()) || 'default'
   while (state.entities.length > MAX_ENTITIES) {
     const candidates = state.entities
-      .filter(entity => entity.id !== retainedId && !(entity.isMain && entity.sessionId === activeSession && entity.profile === activeProfile))
+      .filter(entity => entity.id !== retainedId && !isFocused(entity))
       .sort((a, b) => {
         const aLive = a.status === 'active' || a.status === 'waiting' ? 1 : 0
         const bLive = b.status === 'active' || b.status === 'waiting' ? 1 : 0
@@ -87,11 +120,6 @@ function boundEntities(state, retainedId = '') {
     if (!candidates.length) break
     state.entities = state.entities.filter(entity => entity.id !== candidates[0].id)
   }
-}
-
-function redactEntityMetadata(entity) {
-  entity.goal = ''
-  entity.tool = ''
 }
 
 function ensureEntity(state, id, options = {}) {
@@ -103,14 +131,11 @@ function ensureEntity(state, id, options = {}) {
     parentId: options.parentId || '',
     depth: Number(options.depth || 0),
     isMain: Boolean(options.isMain),
+    connectionId: options.connectionId ?? currentConnection(),
     profile: options.profile || '',
     sessionId: options.sessionId || '',
-    childSessionId: options.childSessionId || '',
     subId: options.subId || '',
     name: displayName({ ...options, index }),
-    model: safe(options.model),
-    goal: safeMetadata(options.goal),
-    detail: '',
     tool: '',
     activity: options.isMain ? 'idle' : 'planning',
     status: options.isMain ? 'idle' : 'queued',
@@ -125,16 +150,15 @@ function ensureEntity(state, id, options = {}) {
   return entity
 }
 
-function ensureMain(sessionId, profile = '', model = '') {
+function ensureMain(sessionId, profile = 'default') {
   const sid = sessionId || 'draft'
   mutate(state => {
     if (sid !== 'draft') {
       state.entities = state.entities.filter(entity => !(entity.isMain && entity.profile === profile && entity.sessionId === 'draft'))
     }
     const id = `main:${profile || 'default'}:${sid}`
-    const entity = ensureEntity(state, id, { isMain: true, model, profile, sessionId: sid })
-    entity.name = displayName({ isMain: true, profile, sessionId: sid, index: entity.order })
-    entity.model = safe(model) || entity.model
+    const entity = ensureEntity(state, id, { isMain: true, profile, sessionId: sid })
+    relabelMains(state)
     entity.lastSeen = Date.now()
   })
 }
@@ -143,8 +167,21 @@ function eventSession(event, payload) {
   return safe(event?.session_id) || safe(payload?.session_id) || safe(host.state.activeSessionId.get()) || 'draft'
 }
 
+// The wildcard stream includes housekeeping and secondary-connection traffic.
+// Only evidence of work from the selected connection may mutate this roster.
+const ACTIVITY_EVENTS = new Set([
+  'message.start', 'message.delta', 'message.interim', 'message.complete', 'error',
+  'reasoning.start', 'reasoning.delta', 'thinking.start', 'thinking.delta',
+  'tool.generating', 'tool.start', 'tool.progress', 'tool.complete',
+  'subagent.start', 'subagent.spawn_requested', 'subagent.progress', 'subagent.text',
+  'subagent.thinking', 'subagent.tool', 'subagent.complete',
+  'approval.request', 'approval.pending', 'sudo.request', 'clarify.request', 'secret.request'
+])
+
 function ingest(event) {
-  if (!event || typeof event.type !== 'string') return
+  if (!event || !ACTIVITY_EVENTS.has(event.type) || host.state.gateway.get() !== 'open') return
+  const connectionId = currentConnection()
+  if (event.connectionId && connectionId && event.connectionId !== connectionId) return
   const payload = event.payload && typeof event.payload === 'object' ? event.payload : {}
   const type = event.type
   const now = Date.now()
@@ -153,22 +190,26 @@ function ingest(event) {
   const isChild = type.startsWith('subagent.')
   const subId = safe(payload.subagent_id) || safe(payload.child_session_id) || `task-${payload.task_index ?? 0}`
   const parentSubId = safe(payload.parent_id)
-  const id = isChild ? `sub:${sid}:${subId}` : `main:${profile}:${sid}`
+  const id = isChild ? `sub:${profile}:${sid}:${subId}` : `main:${profile}:${sid}`
   const parentId = isChild
     ? parentSubId && parentSubId !== sid
-      ? `sub:${sid}:${parentSubId}`
+      ? `sub:${profile}:${sid}:${parentSubId}`
       : `main:${profile}:${sid}`
     : ''
 
   mutate(state => {
     state.eventCount += 1
     state.lastEventAt = now
+    const terminalKey = `${profile}:${id}`
+    const existing = state.entities.find(item => item.id === id)
+    if (isChild) {
+      const starts = type === 'subagent.start' || type === 'subagent.spawn_requested'
+      if (starts) terminalChildren.delete(terminalKey)
+      else if (terminalChildren.has(terminalKey) || existing?.status === 'done' || existing?.status === 'error') return
+    }
     const entity = ensureEntity(state, id, {
-      childSessionId: safe(payload.child_session_id),
       depth: isChild ? Number(payload.depth || 1) : 0,
-      goal: safeMetadata(payload.goal),
       isMain: !isChild,
-      model: safe(payload.model) || safe(host.state.model.get()),
       parentId,
       profile,
       sessionId: sid,
@@ -178,48 +219,51 @@ function ingest(event) {
     entity.expiresAt = 0
     entity.parentId = parentId || entity.parentId
     entity.depth = isChild ? Math.max(1, Number(payload.depth || entity.depth || 1)) : 0
-    entity.model = safe(payload.model) || entity.model
-    entity.goal = safeMetadata(payload.goal) || entity.goal
-    entity.childSessionId = safe(payload.child_session_id) || entity.childSessionId
+
     entity.pulseAt = now
     entity.pulse = Math.min(1, entity.pulse + 0.46)
 
     if (type === 'message.start') {
-      entity.status = 'active'; entity.activity = 'thinking'; entity.detail = 'turn started'; entity.pulse = 1
+      entity.status = 'active'; entity.activity = 'thinking'; entity.pulse = 1
+    } else if (type === 'message.delta' || type === 'message.interim') {
+      entity.status = 'active'; entity.activity = 'working'
     } else if (/^(reasoning|thinking)\./.test(type)) {
-      entity.status = 'active'; entity.activity = 'thinking'; entity.detail = 'reasoning'
+      entity.status = 'active'; entity.activity = 'thinking'
     } else if (type === 'tool.generating' || type === 'tool.start' || type === 'tool.progress') {
       entity.status = 'active'; entity.tool = safe(payload.name) || entity.tool || 'tool'
-      entity.activity = classifyTool(entity.tool); entity.detail = entity.tool; entity.pulse = 1
+      entity.activity = classifyTool(entity.tool); entity.pulse = 1
     } else if (type === 'tool.complete') {
-      entity.status = 'active'; entity.activity = 'thinking'; entity.detail = `${safe(payload.name) || entity.tool || 'tool'} complete`; entity.tool = ''
+      entity.status = 'active'; entity.activity = 'thinking'; entity.tool = ''
     } else if (type === 'message.complete') {
       const failed = /error|fail/.test(safe(payload.status).toLowerCase())
       entity.status = failed ? 'error' : 'done'; entity.activity = failed ? 'waiting' : 'done'
-      entity.detail = failed ? 'turn failed' : 'turn complete'; entity.pulse = 1
-      redactEntityMetadata(entity)
+      entity.pulse = 1
+      entity.tool = ''
     } else if (type === 'error') {
-      entity.status = 'error'; entity.activity = 'waiting'; entity.detail = 'attention required'; entity.pulse = 1
-      redactEntityMetadata(entity)
-    } else if (/^(clarify|approval|sudo|secret)\.request$/.test(type)) {
-      entity.status = 'waiting'; entity.activity = 'waiting'; entity.detail = 'operator input'; entity.pulse = 1
+      entity.status = 'error'; entity.activity = 'waiting'; entity.pulse = 1
+      entity.tool = ''
+    } else if (/^(clarify|approval|sudo|secret)\.request$/.test(type) || type === 'approval.pending') {
+      entity.status = 'waiting'; entity.activity = 'waiting'; entity.pulse = 1
     } else if (type === 'subagent.spawn_requested') {
-      entity.status = 'queued'; entity.activity = 'planning'; entity.detail = 'queued'; entity.pulse = 0.72
+      entity.status = 'queued'; entity.activity = 'planning'; entity.pulse = 0.72
     } else if (type === 'subagent.start') {
-      entity.status = 'active'; entity.activity = 'thinking'; entity.detail = 'delegated mission'; entity.pulse = 1
+      entity.status = 'active'; entity.activity = 'thinking'; entity.pulse = 1
     } else if (type === 'subagent.thinking') {
-      entity.status = 'active'; entity.activity = 'thinking'; entity.detail = 'reasoning'
+      entity.status = 'active'; entity.activity = 'thinking'
     } else if (type === 'subagent.tool') {
       entity.status = 'active'; entity.tool = safe(payload.tool_name) || safe(payload.name) || 'tool'
-      entity.activity = classifyTool(entity.tool); entity.detail = entity.tool; entity.pulse = 1
+      entity.activity = classifyTool(entity.tool); entity.pulse = 1
     } else if (type === 'subagent.progress' || type === 'subagent.text') {
-      entity.status = 'active'; entity.detail = safeMetadata(payload.preview) || 'in progress'
+      entity.status = 'active'
+      if (entity.activity === 'idle') entity.activity = 'working'
     } else if (type === 'subagent.complete') {
       const failed = /error|fail/.test(safe(payload.status).toLowerCase())
       entity.status = failed ? 'error' : 'done'; entity.activity = failed ? 'waiting' : 'done'
-      entity.detail = failed ? 'mission failed' : 'mission complete'; entity.pulse = 1
-      entity.expiresAt = entity.id.includes(':demo-') ? 0 : now + RETAIN_DONE_MS
-      redactEntityMetadata(entity)
+      entity.pulse = 1
+      entity.expiresAt = now + RETAIN_DONE_MS
+      terminalChildren.add(terminalKey)
+      if (terminalChildren.size > MAX_ENTITIES * 8) terminalChildren.delete(terminalChildren.values().next().value)
+      entity.tool = ''
     }
     boundEntities(state)
   })
@@ -227,10 +271,9 @@ function ingest(event) {
 
 function orderedEntities(state) {
   const entities = state.entities
-  const activeSession = host.state.activeSessionId.get()
   const roots = entities
     .filter(entity => entity.isMain)
-    .sort((a, b) => Number(b.sessionId === activeSession) - Number(a.sessionId === activeSession) || b.lastSeen - a.lastSeen)
+    .sort((a, b) => Number(isFocused(b)) - Number(isFocused(a)) || b.lastSeen - a.lastSeen)
   const output = []
   const seen = new Set()
   const appendTree = root => {
@@ -244,22 +287,6 @@ function orderedEntities(state) {
   roots.forEach(appendTree)
   entities.filter(entity => !seen.has(entity.id)).sort((a, b) => a.order - b.order).forEach(appendTree)
   return output
-}
-
-function runSignalTest() {
-  const sid = host.state.activeSessionId.get() || 'demo'
-  const profile = host.state.profile.get() || 'default'
-  ingest({ type: 'message.start', session_id: sid, profile, payload: {} })
-  const activities = ['web_search', 'write_file', 'terminal', 'image_generate']
-  activities.forEach((tool, index) => {
-    const subagent_id = `demo-${index}`
-    ingest({ type: 'subagent.start', session_id: sid, profile, payload: { depth: 1, goal: ['Reconnaissance', 'Interface build', 'System verification', 'Visual synthesis'][index], subagent_id } })
-    ingest({ type: 'subagent.tool', session_id: sid, profile, payload: { depth: 1, subagent_id, tool_name: tool } })
-  })
-  ingest({ type: 'subagent.start', session_id: sid, profile, payload: { depth: 2, goal: 'Nested verification', parent_id: 'demo-2', subagent_id: 'demo-nested' } })
-  ingest({ type: 'subagent.tool', session_id: sid, profile, payload: { depth: 2, parent_id: 'demo-2', subagent_id: 'demo-nested', tool_name: 'read_file' } })
-  haptic('tap')
-  host.notify({ kind: 'info', message: 'Blinkenbar signal test is live. Real gateway events use the same reducer.' })
 }
 
 function parseColor(value) {
@@ -492,6 +519,14 @@ function allocateBanks(entities, rowsAvailable, systemRows) {
   return { banks, usedRows: banks.reduce((max, bank) => Math.max(max, bank.start + bank.rows), systemRows) }
 }
 
+function measurement(metrics, resource, value) {
+  if (!metrics || metrics.errors?.includes(resource) || (metrics.ok === false && !metrics.degraded)) return null
+  if (resource === 'gpu' && metrics.gpu?.available !== true) return null
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+}
+
+const meterText = value => value == null ? '--' : String(Math.round(value)).padStart(2, '0')
+
 function drawBankLabel(ctx, bank, grid, theme, metrics) {
   const top = grid.y + bank.start * grid.rowStride
   const height = bank.rows * grid.rowStride - grid.gapY
@@ -515,10 +550,11 @@ function drawBankLabel(ctx, bank, grid, theme, metrics) {
     font(ctx, 8, '600')
     text(ctx, 'MACHINE', inset + 7, top + height * 0.38, theme.text, 0.56)
     font(ctx, 7, '500')
-    const ioMbps = ((Number(metrics?.io?.read_bps || 0) + Number(metrics?.io?.write_bps || 0)) / 1048576).toFixed(0)
-    const gpu = metrics?.gpu?.available === false ? '--' : String(Math.round(Number(metrics?.gpu?.util || 0))).padStart(2, '0')
-    text(ctx, `C${String(Math.round(Number(metrics?.cpu || 0))).padStart(2, '0')} M${String(Math.round(Number(metrics?.memory || 0))).padStart(2, '0')}`, inset + 7, top + height * 0.57, theme.text2, 0.5)
-    text(ctx, `I${String(ioMbps).padStart(2, '0')}M G${gpu}`, inset + 7, top + height * 0.72, theme.text3, 0.48)
+    const read = measurement(metrics, 'io', metrics?.io?.read_bps)
+    const write = measurement(metrics, 'io', metrics?.io?.write_bps)
+    const ioMbps = read == null || write == null ? null : (read + write) / 1048576
+    text(ctx, `C${meterText(measurement(metrics, 'cpu', metrics?.cpu))} M${meterText(measurement(metrics, 'memory', metrics?.memory))}`, inset + 7, top + height * 0.57, theme.text2, 0.5)
+    text(ctx, `I${meterText(ioMbps)}M G${meterText(measurement(metrics, 'gpu', metrics?.gpu?.util))}`, inset + 7, top + height * 0.72, theme.text3, 0.48)
     return
   }
 
@@ -541,16 +577,17 @@ function drawMatrixBank(ctx, width, height, state, metrics, theme, colors, patte
     lampH: lampSize,
     rowStride: lampSize + PIXEL_GAP
   }
-  const availableWidth = Math.max(120, width - 10)
-  grid.cols = Math.max(6, Math.floor((availableWidth + grid.gapX) / (lampSize + grid.gapX)))
+  const availableWidth = Math.max(0, width - 10)
+  grid.cols = Math.max(0, Math.floor((availableWidth + grid.gapX) / (lampSize + grid.gapX)))
   grid.colStride = grid.lampW + grid.gapX
   const usableWidth = grid.cols * grid.lampW + (grid.cols - 1) * grid.gapX
   // Left-align with the label brackets and footer rule; leftover pixels fall right.
   grid.x = 5
-  grid.rows = Math.max(8, Math.floor((height - 21 - grid.y) / grid.rowStride))
+  grid.rows = Math.max(0, Math.floor((height - 21 - grid.y) / grid.rowStride))
   ctx.drawImage(prepareBankBackdrop(cache, width, height, grid, theme), 0, 0, width, height)
 
   const entities = orderedEntities(state)
+  if (!grid.rows || !grid.cols) return { overflow: entities.length }
   // Two full LED rows per resource (CPU, memory, I/O, GPU).
   const systemRows = Math.min(8, grid.rows)
   const allocation = allocateBanks(entities, grid.rows, systemRows)
@@ -562,10 +599,10 @@ function drawMatrixBank(ctx, width, height, state, metrics, theme, colors, patte
   })
 
   const values = [
-    clamp(metrics?.cpu / 100),
-    clamp(metrics?.memory / 100),
-    clamp(metrics?.io?.activity / 100),
-    clamp(metrics?.gpu?.util / 100)
+    measurement(metrics, 'cpu', metrics?.cpu),
+    measurement(metrics, 'memory', metrics?.memory),
+    measurement(metrics, 'io', metrics?.io?.activity),
+    measurement(metrics, 'gpu', metrics?.gpu?.util)
   ]
   const systemColors = [colors.primary, colors.secondary, theme.orange, theme.purple]
 
@@ -580,7 +617,8 @@ function drawMatrixBank(ctx, width, height, state, metrics, theme, colors, patte
       let signal = 0
       if (systemIndex >= 0) {
         const position = col / Math.max(1, grid.cols - 1)
-        signal = position <= values[systemIndex] ? 0.32 + values[systemIndex] * 0.68 : 0
+        const value = values[systemIndex] == null ? 0 : clamp(values[systemIndex] / 100)
+        signal = value > 0 && position <= value ? 0.32 + value * 0.68 : 0
       } else if (bank?.entity) {
         const grain = 0.72 + hash32(rowSeed, col, 17) * 0.28
         signal = activitySignal(bank.entity, col, grid.cols, rowSeed, time) * grain
@@ -607,14 +645,7 @@ function drawMatrixBank(ctx, width, height, state, metrics, theme, colors, patte
   })
   allBanks.forEach(bank => drawBankLabel(ctx, bank, grid, theme, metrics))
 
-  const hits = allocation.banks.map(bank => ({
-    entity: bank.entity,
-    x: 0,
-    y: grid.y + bank.start * grid.rowStride,
-    w: width,
-    h: bank.rows * grid.rowStride
-  }))
-  return { hits, overflow: Math.max(0, entities.length - allocation.banks.length), visible: allocation.banks.length }
+  return { overflow: Math.max(0, entities.length - allocation.banks.length) }
 }
 
 function BlinkenCanvas({ metrics, mode, pattern }) {
@@ -627,7 +658,6 @@ function BlinkenCanvas({ metrics, mode, pattern }) {
   const patternRef = useRef(pattern)
   const themeRef = useRef(null)
   const bankCacheRef = useRef({})
-  const hitsRef = useRef([])
 
   useEffect(() => { stateRef.current = state }, [state])
   useEffect(() => { metricsRef.current = metrics }, [metrics])
@@ -676,7 +706,7 @@ function BlinkenCanvas({ metrics, mode, pattern }) {
     const render = time => {
       if (stopped) return
       frame = requestAnimationFrame(render)
-      if (!visible || time - lastPaint < 120) return
+      if (!visible || document.visibilityState !== 'visible' || time - lastPaint < 120) return
       lastPaint = time
       const theme = themeRef.current || resolveTheme()
       const colors = modePalette(theme, modeRef.current)
@@ -686,14 +716,13 @@ function BlinkenCanvas({ metrics, mode, pattern }) {
         cssWidth,
         cssHeight,
         stateRef.current,
-        metricsRef.current || {},
+        metricsRef.current,
         theme,
         colors,
         patternRef.current,
         time,
         bankCacheRef.current
       )
-      hitsRef.current = bank.hits
 
       const footerY = cssHeight - 10
       ctx.fillStyle = color(BLACK, 0.96)
@@ -715,30 +744,12 @@ function BlinkenCanvas({ metrics, mode, pattern }) {
     }
   }, [])
 
-  const inspect = event => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const rect = canvas.getBoundingClientRect()
-    const x = event.clientX - rect.left
-    const y = event.clientY - rect.top
-    const hit = [...hitsRef.current].reverse().find(item => x >= item.x && x <= item.x + item.w && y >= item.y && y <= item.y + item.h)
-    if (!hit) return
-    const entity = hit.entity
-    haptic('tap')
-    host.notify({
-      kind: entity.status === 'error' ? 'error' : 'info',
-      title: `${entity.name} · ${entity.status.toUpperCase()}`,
-      message: entity.goal || entity.detail || `${entity.activity} · ${entity.model || shortId(entity.sessionId)}`
-    })
-  }
-
   return jsx('div', {
     ref: wrapRef,
     className: 'min-h-0 flex-1 overflow-hidden',
     children: jsx('canvas', {
       ref: canvasRef,
-      onClick: inspect,
-      className: 'block h-full w-full cursor-crosshair',
+      className: 'block h-full w-full',
       style: { imageRendering: 'pixelated' }
     })
   })
@@ -758,16 +769,36 @@ function TinyControl({ label, title, onClick }) {
 }
 
 function BlinkenPane({ ctx }) {
+  const paneRef = useRef(null)
+  const [intersecting, setIntersecting] = useState(false)
+  const [documentVisible, setDocumentVisible] = useState(() => document.visibilityState === 'visible')
   const [mode, setMode] = useState(() => ctx.storage.get('mode', 'EMBER'))
   const [pattern, setPattern] = useState(() => ctx.storage.get('pattern', 'CROSSWASH'))
   const gateway = useValue(host.state.gateway)
+  const profile = useValue(host.state.profile)
+  const epoch = useValue($telemetryEpoch)
+  const connectionId = host.state.connectionId?.get() || 'legacy'
+  const polling = intersecting && documentVisible && gateway === 'open'
+  useEffect(() => {
+    const observer = new IntersectionObserver(entries => setIntersecting(entries.some(entry => entry.isIntersecting)))
+    if (paneRef.current) observer.observe(paneRef.current)
+    const updateVisibility = () => setDocumentVisible(document.visibilityState === 'visible')
+    document.addEventListener('visibilitychange', updateVisibility)
+    updateVisibility()
+    return () => { observer.disconnect(); document.removeEventListener('visibilitychange', updateVisibility) }
+  }, [])
   const metricsQuery = useQuery({
-    queryKey: [ID, 'metrics'],
+    queryKey: [ID, 'metrics', connectionId, profile, epoch],
     queryFn: () => ctx.rest('/metrics', { timeoutMs: 1500 }),
-    refetchInterval: 2000,
+    enabled: polling,
+    refetchInterval: polling ? 2000 : false,
     refetchIntervalInBackground: false,
     retry: 1
   })
+  const metrics = gateway === 'open' && !metricsQuery.error && !metricsQuery.isPending ? metricsQuery.data || null : null
+  const telemetryStatus = gateway !== 'open' || metricsQuery.error ? 'TELEMETRY OFFLINE'
+    : !metrics ? 'TELEMETRY PENDING'
+      : metrics.degraded || metrics.ok === false ? 'TELEMETRY DEGRADED' : 'PASSIVE TELEMETRY'
 
   const cycleMode = () => {
     const next = MODES[(Math.max(0, MODES.indexOf(mode)) + 1) % MODES.length]
@@ -777,24 +808,13 @@ function BlinkenPane({ ctx }) {
     const next = PATTERNS[(Math.max(0, PATTERNS.indexOf(pattern)) + 1) % PATTERNS.length]
     setPattern(next); ctx.storage.set('pattern', next); haptic('tap')
   }
-  const relinkTelemetry = async () => {
+  const retryTelemetry = () => {
     haptic('tap')
-    try {
-      const desktop = globalThis.window?.hermesDesktop
-      if (desktop?.getConnectionConfig && desktop?.applyConnectionConfig) {
-        const config = await desktop.getConnectionConfig()
-        await desktop.applyConnectionConfig(config)
-        host.notify({ kind: 'success', message: 'Hermes backend reconnected. Blinkenbar telemetry will resume automatically.' })
-      } else {
-        await host.restartGateway()
-        host.notify({ kind: 'success', message: 'Gateway restarted. Blinkenbar telemetry will reconnect automatically.' })
-      }
-    } catch (error) {
-      host.notifyError(error, 'Could not reconnect Blinkenbar telemetry')
-    }
+    return metricsQuery.refetch()
   }
 
   return jsxs('section', {
+    ref: paneRef,
     className: 'flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden',
     children: [
       jsxs('header', {
@@ -806,16 +826,16 @@ function BlinkenPane({ ctx }) {
               jsx('div', { className: 'truncate font-mono text-[0.65rem] font-bold tracking-[0.18em]', children: 'BLINKENBAR' }),
               jsx('div', {
                 className: 'truncate font-mono text-[0.5rem] text-(--ui-text-quaternary)',
-                children: `${gateway === 'open' ? 'LIVE MESH' : String(gateway).toUpperCase()} · ${metricsQuery.error ? 'TELEMETRY OFFLINE' : metricsQuery.data?.degraded ? 'TELEMETRY DEGRADED' : 'PASSIVE TELEMETRY'}`
+                children: `${gateway === 'open' ? 'LIVE MESH' : String(gateway).toUpperCase()} · ${telemetryStatus}`
               })
             ]
           }),
-          metricsQuery.error ? jsx(TinyControl, { label: 'LINK', title: 'Restart gateway and load local telemetry backend', onClick: relinkTelemetry }) : null,
+          metricsQuery.error ? jsx(TinyControl, { label: 'RETRY', title: 'Retry telemetry query', onClick: retryTelemetry }) : null,
           jsx(TinyControl, { label: mode, title: 'Cycle color mode', onClick: cycleMode }),
           jsx(TinyControl, { label: pattern === 'STOCHASTIC' ? 'RANDOM' : pattern === 'CROSSWASH' ? 'CROSS' : pattern, title: 'Cycle idle fill pattern', onClick: cyclePattern })
         ]
       }),
-      jsx(BlinkenCanvas, { metrics: metricsQuery.data || {}, mode, pattern })
+      jsx(BlinkenCanvas, { metrics, mode, pattern })
     ]
   })
 }
@@ -826,10 +846,8 @@ function StatusChip() {
   const attention = state.entities.some(entity => entity.status === 'waiting' || entity.status === 'error')
   return jsx(Tip, {
     label: 'Blinkenbar live agent mesh',
-    children: jsxs('button', {
-      type: 'button',
-      onClick: runSignalTest,
-      className: cn('inline-flex h-full items-center gap-1.5 px-1.5 font-mono text-[0.62rem] text-(--ui-text-tertiary) hover:bg-(--chrome-action-hover) hover:text-foreground'),
+    children: jsxs('span', {
+      className: 'inline-flex h-full items-center gap-1.5 px-1.5 font-mono text-[0.62rem] text-(--ui-text-tertiary)',
       children: [
         jsx('span', { className: cn('inline-block size-1.5', attention ? 'bg-(--ui-yellow)' : active ? 'bg-(--ui-green)' : 'bg-(--ui-text-quaternary)') }),
         jsx('span', { children: `BLINK ${active}` })
@@ -841,23 +859,102 @@ function StatusChip() {
 function installBridge() {
   const key = '__blinkenbarBridge'
   globalThis[key]?.dispose?.()
+  let disposed = false, nameRequest = 0
+  let gatewayState = host.state.gateway.get()
+  const clearNames = () => {
+    $identity.set({ ...$identity.get(), names: new Map() })
+    mutate(relabelMains)
+  }
+  // profiles.list is the supported read-only roster RPC. No session previews,
+  // config reads, cross-plugin storage, per-agent calls, or metadata polling.
+  const refreshNames = async () => {
+    const generation = ++nameRequest
+    const connectionId = currentConnection()
+    const profile = host.state.profile.get()
+    if (disposed || host.state.gateway.get() !== 'open' || typeof host.request !== 'function') return
+    try {
+      const result = await host.request('profiles.list', { include_sessions: false })
+      if (disposed || generation !== nameRequest || connectionId !== currentConnection()
+        || profile !== host.state.profile.get() || host.state.gateway.get() !== 'open') return
+      if (!Array.isArray(result?.profiles)) return
+      const names = new Map()
+      for (const row of result.profiles) {
+        if (!row || typeof row.name !== 'string' || !row.name.trim()) continue
+        // Bot Mode's public server metadata has precedence over display_name.
+        // Older hosts simply omit it; never read Bot Mode's local storage.
+        const label = identityLabel(row.ui_meta?.['hermes-bots']?.title)
+          || identityLabel(row.display_name)
+          || identityLabel(row.name === 'default' ? 'Hermes' : row.name)
+        names.set(identityKey(connectionId, row.name), label)
+      }
+      $identity.set({ ...$identity.get(), names })
+      mutate(relabelMains)
+    } catch {
+      // Offline/old hosts keep same-source names or the profile-name fallback.
+    }
+  }
+  clearNames()
   const offEvents = host.onEvent('*', ingest)
-  const offSession = host.state.activeSessionId.listen(sessionId => ensureMain(sessionId || 'draft', host.state.profile.get(), host.state.model.get()))
+  const syncFocus = () => {
+    const focus = focusedContext()
+    if (focus.resolved) ensureMain(focus.sessionId, focus.profile)
+    else mutate(relabelMains)
+  }
+  const focusAtoms = new Set([
+    host.state.focusedSessionId || host.state.activeSessionId,
+    host.state.focusedSessionProfile || host.state.profile,
+    host.state.focusedSessionOwner,
+    host.state.focusedStoredSessionId,
+    host.state.profile
+  ].filter(Boolean))
+  const offs = [...focusAtoms].map(store => store.listen(syncFocus))
+  const invalidateTelemetry = () => $telemetryEpoch.set($telemetryEpoch.get() + 1)
+  offs.push(host.state.gateway.listen(() => {
+    invalidateTelemetry()
+    const next = host.state.gateway.get()
+    if (next !== gatewayState) {
+      gatewayState = next
+      refreshNames() // Also fences in-flight replies when the stream closes.
+    }
+    if (host.state.gateway.get() !== 'open') mutate(state => {
+      for (const entity of state.entities) {
+        if (!['active', 'waiting', 'queued'].includes(entity.status)) continue
+        entity.status = 'unknown'; entity.activity = 'idle'; entity.tool = ''; entity.pulse = 0
+        if (!entity.isMain) entity.expiresAt = Date.now() + RETAIN_DONE_MS
+      }
+    })
+  }))
+  offs.push(host.state.profile.listen(() => {
+    invalidateTelemetry()
+    if (!host.state.connectionId) clearNames()
+    refreshNames()
+  }))
+  if (host.state.connectionId) offs.push(host.state.connectionId.listen(() => {
+    // The event stream/REST route changed; never mix the previous machine in.
+    terminalChildren.clear()
+    $mesh.set({ entities: [], eventCount: 0, lastEventAt: 0 })
+    clearNames()
+    invalidateTelemetry()
+    syncFocus()
+    refreshNames()
+  }))
+  invalidateTelemetry()
   const timer = setInterval(() => mutate(state => {
     const now = Date.now()
     state.entities = state.entities.filter(entity => !entity.expiresAt || entity.expiresAt > now)
     state.entities.forEach(entity => {
       entity.pulse = Math.max(0.08, entity.pulse * 0.78)
       if (entity.isMain && entity.status === 'done' && now - entity.lastSeen > 6000) {
-        entity.status = 'idle'; entity.activity = 'idle'; entity.detail = 'standing by'
+        entity.status = 'idle'; entity.activity = 'idle'
       }
     })
   }), 4000)
   const bridge = {
-    dispose() { offEvents?.(); offSession?.(); clearInterval(timer) }
+    dispose() { disposed = true; nameRequest++; offEvents?.(); offs.forEach(off => off?.()); clearInterval(timer) }
   }
   globalThis[key] = bridge
-  ensureMain(host.state.activeSessionId.get() || 'draft', host.state.profile.get(), host.state.model.get())
+  syncFocus()
+  refreshNames()
   return bridge
 }
 
@@ -867,7 +964,9 @@ export default {
   description: 'A low-overhead blinkenlight rail for local telemetry and the live agent hierarchy.',
   defaultEnabled: false,
   register(ctx) {
-    $identity.set({ label: safe(ctx.storage.get('agentLabel', 'AGENT'), 20).toUpperCase() || 'AGENT' })
+    // Do not migrate the old global agentLabel: it has no trustworthy owner.
+    const overrides = ctx.storage.get('agentLabelsV2', {})
+    $identity.set({ names: new Map(), overrides: overrides && typeof overrides === 'object' && !Array.isArray(overrides) ? overrides : {} })
     const bridge = installBridge()
     ctx.onDispose(() => bridge.dispose())
     ctx.registerMany([
@@ -889,19 +988,9 @@ export default {
         area: PALETTE_AREA,
         data: {
           id: 'blinkenbar.configure-identity',
-          label: 'Blinkenbar: Configure agent label',
+          label: 'Blinkenbar: Override focused profile label',
           keywords: ['agent', 'identity', 'label', 'name'],
           run: () => configureIdentity(ctx)
-        }
-      },
-      {
-        id: 'blinkenbar-test',
-        area: PALETTE_AREA,
-        data: {
-          id: 'blinkenbar.signal-test',
-          label: 'Blinkenbar: Run live signal test',
-          keywords: ['blinkenlights', 'agents', 'telemetry', 'lights', 'test'],
-          run: runSignalTest
         }
       }
     ])
