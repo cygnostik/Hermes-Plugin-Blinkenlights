@@ -23,6 +23,8 @@ Product screenshots are generated from this repository's plugin code. No video f
 
 ## Visual inspiration
 
-The blinkenlight visual direction was inspired by a demonstration by Boz Brown: https://www.youtube.com/watch?v=vKjqw5iGqnQ. No content from the video is bundled or represented as licensed material. Boz Brown is not affiliated with, a contributor to, or an endorser of Blinkenbar.
+Blinkenbar's visual inspiration is the light panels of Thinking Machines Corporation's [Connection Machine CM-5](https://en.wikipedia.org/wiki/Connection_Machine).
+
+[Boz Brown's video](https://www.youtube.com/watch?v=vKjqw5iGqnQ) was used only as a motion reference, not as the source of the design inspiration. No content from the video is bundled or represented as licensed material. Boz Brown is not affiliated with, a contributor to, or an endorser of Blinkenbar.
 
 This notice is informational and is not a substitute for the license notices shipped by each dependency. Before a release, verify exact dependency versions and reproduce all notices required by the distribution method.

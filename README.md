@@ -107,7 +107,7 @@ Chris M. · ProDyn.ai / Promethean Dynamic
 
 `chrism@promethean-dynamic.com`
 
-Inspired by classic supercomputer light panels and the blinkenlight aesthetic demonstrated by Boz Brown in [this video](https://www.youtube.com/watch?v=vKjqw5iGqnQ). Boz Brown is not affiliated with or an endorser of Blinkenbar.
+Inspired by the light panels of Thinking Machines Corporation's [Connection Machine CM-5](https://en.wikipedia.org/wiki/Connection_Machine).
 
 Open an issue for ordinary bugs. Send security reports privately as described in [SECURITY.md](SECURITY.md). See [CHANGELOG.md](CHANGELOG.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
