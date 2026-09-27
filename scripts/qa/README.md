@@ -27,6 +27,8 @@ ffmpeg -hide_banner -loglevel error -y -framerate 8 \
   -loop 0 docs/media/blinkenbar-demo.gif
 ```
 
-Media mode overwrites the README stills and catalog image. The animation combines 64 sequential browser captures at an eight-frame-per-second playback rate; it is not a timing benchmark. Review generated assets before committing them. Images demonstrate the renderer, not native Hermes installation or live gateway integration.
+Media mode overwrites the actual-plugin stills and the older raw panel capture `docs/media/blinkenbar-catalog.png`. It does **not** overwrite the approved README artwork or the dedicated `blinkenbar-catalog-hero.png` candidate. Regenerate that crop-safe promotional composite separately with `node scripts/media/render-catalog.mjs`; see [media consumers, bounds and checks](../../docs/media/README.md). No metrics sample or runtime harness is needed for that composition.
+
+The animation combines 64 sequential browser captures at an eight-frame-per-second playback rate; it is not a timing benchmark. Review generated assets before committing them. Images demonstrate the renderer, not native Hermes installation or live gateway integration.
 
 Do not include `.qa/`, dependency directories or local metrics files in a release. A clean-checkout security scan avoids irrelevant warnings from generated third-party Vite caches.
